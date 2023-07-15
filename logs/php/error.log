@@ -1,0 +1,2 @@
+[15-Jul-2023 23:35:00 UTC] Cron reschedule event error for hook: patreon_five_minute_action, Error code: invalid_schedule, Error message: Event schedule does not exist., Data: {"schedule":"patreon_five_minute_cron_schedule","args":[],"interval":300}
+[15-Jul-2023 23:35:09 UTC] Cron reschedule event error for hook: wpdiscuz_delete_unattached_images, Error code: invalid_schedule, Error message: Event schedule does not exist., Data: {"schedule":"wpdiscuz_delete_unattached_images_every_48h","args":[],"interval":172800}

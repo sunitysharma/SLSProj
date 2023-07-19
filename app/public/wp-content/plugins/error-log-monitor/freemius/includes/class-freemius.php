@@ -1546,7 +1546,7 @@
                     fs_request_is_action( 'reset_anonymous_mode' ) ||
                     fs_request_is_action( 'reset_pending_activation_mode' )
                 ) &&
-                $this->get_unique_affix() === fs_request_get( 'fs_unique_affix' )
+                $this->get_unique_affix() === fs_request_get_raw( 'fs_unique_affix' )
             ) {
                 add_action( 'admin_init', array( &$this, 'connect_again' ) );
             }
@@ -3759,7 +3759,7 @@
                 self::shoot_ajax_failure();
             }
 
-            $option_value = fs_request_get( 'option_value' );
+            $option_value = fs_request_get_raw( 'option_value' );
 
             if ( ! empty( $option_value ) ) {
                 update_option( $option_name, $option_value );
@@ -12148,9 +12148,7 @@
                 }
             }
 
-            //[WSH] Crash workaround: _sync_licenses depends on the _user property being set
-	        // and it can cause a fatal error if the user hasn't been initialised yet.
-            if ( ! $this->has_any_license() && $sync_licenses && isset($this->_user) ) {
+            if ( ! $this->has_any_license() && $sync_licenses ) {
                 $this->_sync_licenses( $id );
             }
 
@@ -13676,7 +13674,7 @@
             
             $this->check_ajax_referer( 'activate_license' );
 
-            $license_key = trim( fs_request_get( 'license_key' ) );
+            $license_key = trim( fs_request_get_raw( 'license_key' ) );
 
             if ( empty( $license_key ) ) {
                 exit;
@@ -16692,64 +16690,6 @@
         }
 
         /**
-         * Tries to activate account based on POST params.
-         *
-         * @author     Vova Feldman (@svovaf)
-         * @since      1.0.2
-         *
-         * @deprecated Not in use, outdated.
-         */
-        function _activate_account() {
-            if ( $this->is_registered() ) {
-                // Already activated.
-                return;
-            }
-
-            self::_clean_admin_content_section();
-
-            if ( fs_request_is_action( 'activate' ) && fs_request_is_post() ) {
-//				check_admin_referer( 'activate_' . $this->_plugin->public_key );
-
-                // Verify matching plugin details.
-                if ( $this->_plugin->id != fs_request_get( 'plugin_id' ) || $this->_slug != fs_request_get( 'plugin_slug' ) ) {
-                    return;
-                }
-
-                $user              = new FS_User();
-                $user->id          = fs_request_get( 'user_id' );
-                $user->public_key  = fs_request_get( 'user_public_key' );
-                $user->secret_key  = fs_request_get( 'user_secret_key' );
-                $user->email       = fs_request_get( 'user_email' );
-                $user->first       = fs_request_get( 'user_first' );
-                $user->last        = fs_request_get( 'user_last' );
-                $user->is_verified = fs_request_get_bool( 'user_is_verified' );
-
-                $site             = new FS_Site();
-                $site->id         = fs_request_get( 'install_id' );
-                $site->public_key = fs_request_get( 'install_public_key' );
-                $site->secret_key = fs_request_get( 'install_secret_key' );
-                $site->plan_id    = fs_request_get( 'plan_id' );
-
-                $plans      = array();
-                $plans_data = json_decode( urldecode( fs_request_get( 'plans' ) ) );
-                foreach ( $plans_data as $p ) {
-                    $plan = new FS_Plugin_Plan( $p );
-                    if ( $site->plan_id == $plan->id ) {
-                        $plan->title = fs_request_get( 'plan_title' );
-                        $plan->name  = fs_request_get( 'plan_name' );
-                    }
-
-                    $plans[] = $plan;
-                }
-
-                $this->_set_account( $user, $site, $plans );
-
-                // Reload the page with the keys.
-                fs_redirect( $this->_get_admin_page_url() );
-            }
-        }
-
-        /**
          * @author Vova Feldman (@svovaf)
          * @since  1.0.7
          *
@@ -16817,7 +16757,6 @@
                 }
             }
 
-            $should_load_plans = false;
             if ( is_object( $site ) &&
                  is_numeric( $site->id ) &&
                  is_numeric( $site->user_id ) &&
@@ -16825,8 +16764,6 @@
             ) {
                 // Load site.
                 $this->_site = $site;
-
-                $should_load_plans = true;
             }
 
             $user = null;
@@ -16885,33 +16822,6 @@
                     clone $user :
                     null;
             }
-
-            /*
-             * [WSH] Crash workaround: Move the code that loads plans so that it runs *after* the user object
-             * is initialized. _sync_plans() indirectly calls get_current_or_network_user_api_scope(), which
-             * assumes that one of the following must be true:
-             *  a) The plugin is active for the entire network.
-             *  b) The user has already been loaded.
-             *
-             * In a situation where the plugin is activated only on certain sites and plans haven't been cached,
-             * this will lead to a fatal error because get_current_or_network_user_api_scope() will try to use
-             * the uninitialized user object.
-	         */
-	        if ( $should_load_plans && ($this->_is_network_active || isset($this->_user)) ) {
-		        // Load plans.
-		        $this->_plans = $plans[ $this->_slug ];
-		        if ( ! is_array( $this->_plans ) || empty( $this->_plans ) ) {
-			        $this->_sync_plans();
-		        } else {
-			        for ( $i = 0, $len = count( $this->_plans ); $i < $len; $i ++ ) {
-				        if ( $this->_plans[ $i ] instanceof FS_Plugin_Plan ) {
-					        $this->_plans[ $i ] = self::decrypt_entity( $this->_plans[ $i ] );
-				        } else {
-					        unset( $this->_plans[ $i ] );
-				        }
-			        }
-		        }
-	        }
 
             if ( is_object( $this->_user ) ) {
                 // Load licenses.
@@ -17793,8 +17703,8 @@
 
                         $this->install_many_pending_with_user(
                             fs_request_get( 'user_id' ),
-                            fs_request_get( 'user_public_key' ),
-                            fs_request_get( 'user_secret_key' ),
+                            fs_request_get_raw( 'user_public_key' ),
+                            fs_request_get_raw( 'user_secret_key' ),
                             fs_request_get_bool( 'is_marketing_allowed', null ),
                             fs_request_get_bool( 'is_extensions_tracking_allowed', null ),
                             fs_request_get_bool( 'is_diagnostic_tracking_allowed', null ),
@@ -17805,14 +17715,14 @@
                     } else {
                         $this->install_with_new_user(
                             fs_request_get( 'user_id' ),
-                            fs_request_get( 'user_public_key' ),
-                            fs_request_get( 'user_secret_key' ),
+                            fs_request_get_raw( 'user_public_key' ),
+                            fs_request_get_raw( 'user_secret_key' ),
                             fs_request_get_bool( 'is_marketing_allowed', null ),
                             fs_request_get_bool( 'is_extensions_tracking_allowed', null ),
                             fs_request_get_bool( 'is_diagnostic_tracking_allowed', null ),
                             fs_request_get( 'install_id' ),
-                            fs_request_get( 'install_public_key' ),
-                            fs_request_get( 'install_secret_key' ),
+                            fs_request_get_raw( 'install_public_key' ),
+                            fs_request_get_raw( 'install_secret_key' ),
                             true,
                             fs_request_get_bool( 'auto_install' )
                         );
@@ -18151,13 +18061,13 @@
             }
 
             if ( fs_request_is_action( $this->get_unique_affix() . '_activate_existing' ) && fs_request_is_post() ) {
-//				check_admin_referer( 'activate_existing_' . $this->_plugin->public_key );
+				check_admin_referer( $this->get_unique_affix() . '_activate_existing' );
 
                 /**
                  * @author Vova Feldman (@svovaf)
                  * @since  1.1.9 Add license key if given.
                  */
-                $license_key = fs_request_get( 'license_secret_key' );
+                $license_key = fs_request_get_raw( 'license_secret_key' );
 
                 FS_Permission_Manager::instance( $this )->update_permissions_tracking_flag( array(
                     FS_Permission_Manager::PERMISSION_DIAGNOSTIC => fs_request_get_bool( 'is_diagnostic_tracking_allowed', null ),
@@ -19236,10 +19146,6 @@
                     $menu_slug           = $this->_menu->get_slug( $item['menu_slug'] );
 
                     if ( ! isset( $item['url'] ) ) {
-	                    /* WSH: Fix deprecation warnings about passing NULL to strpos()
-	                     * and str_replace(). Use an empty string instead when registering
-	                     * a menu item without a valid parent slug.
-	                     */
                         $hook = FS_Admin_Menu_Manager::add_subpage(
                             $item['show_submenu'] ?
                                 $top_level_menu_slug :
@@ -20498,11 +20404,6 @@
             $this->_logger->entrance();
             $api = $this->get_current_or_network_user_api_scope();
 
-            //WSH: Fallback in case there is no user object and thus no API object.
-            if ( empty($api) ) {
-            	return array();
-            }
-
             /**
              * @since 1.2.3 When running in DEV mode, retrieve pending plans as well.
              */
@@ -20901,7 +20802,7 @@
                 return;
             }
 
-            $license_or_user_key = fs_request_get( 'license_or_user_key' );
+            $license_or_user_key = fs_request_get_raw( 'license_or_user_key' );
 
             $transient_value = ( ! empty( $license_or_user_key ) ) ?
                 'true' :
@@ -22739,8 +22640,8 @@
 
             $user             = new FS_User();
             $user->id         = fs_request_get( 'user_id' );
-            $user->public_key = fs_request_get( 'user_public_key' );
-            $user->secret_key = fs_request_get( 'user_secret_key' );
+            $user->public_key = fs_request_get_raw( 'user_public_key' );
+            $user->secret_key = fs_request_get_raw( 'user_secret_key' );
 
             $prev_user   = $this->_user;
             $this->_user = $user;
@@ -23236,6 +23137,9 @@
                     $state = fs_request_get( 'state', 'init' );
                     switch ( $state ) {
                         case 'init':
+                            // The nonce is injected by the error handler in `_email_address_update_ajax_handler` function.
+                            check_admin_referer( 'change_owner' );
+
                             $candidate_email = fs_request_get( 'candidate_email' );
                             $transfer_type   = fs_request_get( 'transfer_type' );
 
@@ -23248,11 +23152,17 @@
                             }
                             break;
                         case 'owner_confirmed':
+                            // We cannot (or need not to) check the nonce and referer here, because the link comes from the email sent by our API.
                             $candidate_email = fs_request_get( 'candidate_email', '' );
+
+                            if ( ! is_email($candidate_email ) ) {
+                                return;
+                            }
 
                             $this->_admin_notices->add( sprintf( $this->get_text_inline( 'Thanks for confirming the ownership change. An email was just sent to %s for final approval.', 'change-owner-request_owner-confirmed' ), '<b>' . $candidate_email . '</b>' ) );
                             break;
                         case 'candidate_confirmed':
+                            // We do not need to validate the authenticity of this request here, because the `complete_change_owner` does that for us through API calls.
                             if ( $this->complete_change_owner() ) {
                                 $this->_admin_notices->add_sticky(
                                     sprintf( $this->get_text_inline( '%s is the new owner of the account.', 'change-owner-request_candidate-confirmed' ), '<b>' . $this->_user->email . '</b>' ),
@@ -23285,6 +23195,10 @@
                     return;
 
                 #region Actions that might be called from external links (e.g. email)
+
+                /**
+                 * !!IMPORTANT!!: We cannot check for a valid nonce in this region, because the links could be coming from emails.
+                 */
 
                 case 'cancel_trial':
                     $result = $this->cancel_subscription_or_trial( $plugin_id );
@@ -23592,11 +23506,11 @@
                     $params = array(
                         'is_enriched'  => true,
                         'trial'        => fs_request_get_bool( 'trial' ),
-                        'sandbox'      => fs_request_get( 'sandbox' ),
-                        's_ctx_type'   => fs_request_get( 's_ctx_type' ),
-                        's_ctx_id'     => fs_request_get( 's_ctx_id' ),
-                        's_ctx_ts'     => fs_request_get( 's_ctx_ts' ),
-                        's_ctx_secure' => fs_request_get( 's_ctx_secure' ),
+                        'sandbox'      => fs_request_get_raw( 'sandbox' ),
+                        's_ctx_type'   => fs_request_get_raw( 's_ctx_type' ),
+                        's_ctx_id'     => fs_request_get_raw( 's_ctx_id' ),
+                        's_ctx_ts'     => fs_request_get_raw( 's_ctx_ts' ),
+                        's_ctx_secure' => fs_request_get_raw( 's_ctx_secure' ),
                     );
 
                     $bundle_id         = $this->get_bundle_id();
@@ -23740,8 +23654,7 @@
          * @return FS_Api
          */
         function get_api_user_scope( $flush = false ) {
-        	//WSH: _user might not be initialised at this point, so check for that first.
-            if ( (! isset( $this->_user_api ) || $flush) && !empty($this->_user) ) {
+            if ( ! isset( $this->_user_api ) || $flush ) {
                 $this->_user_api = $this->get_api_user_scope_by_user( $this->_user );
             }
 
@@ -25927,7 +25840,7 @@
                 '%s %s %s',
                 $thank_you,
                 $already_opted_in,
-                sprintf( $this->get_text_inline( 'Due to the new %sEU General Data Protection Regulation (GDPR)%s compliance requirements it is required that you provide your explicit consent, again, confirming that you are onboard :-)', 'due-to-gdpr-compliance-requirements' ), '<a href="https://eugdpr.org/" target="_blank" rel="noopener noreferrer">', '</a>' ) .
+                sprintf( $this->get_text_inline( 'Due to the new %sEU General Data Protection Regulation (GDPR)%s compliance requirements it is required that you provide your explicit consent, again, confirming that you are onboard :-)', 'due-to-gdpr-compliance-requirements' ), '<a href="https://ec.europa.eu/info/law/law-topic/data-protection_en/" target="_blank" rel="noopener noreferrer">', '</a>' ) .
                 '<br><br>' .
                 '<b>' . $this->get_text_inline( "Please let us know if you'd like us to contact you for security & feature updates, educational content, and occasional offers:", 'contact-for-updates' ) . '</b>' .
                 $actions .
@@ -26216,7 +26129,7 @@
 
             $this->check_ajax_referer( 'fetch_is_marketing_required_flag_value' );
 
-            $license_key = fs_request_get( 'license_key' );
+            $license_key = fs_request_get_raw( 'license_key' );
 
             if ( empty($license_key) ) {
                 self::shoot_ajax_failure( $this->get_text_inline( 'License key is empty.', 'empty-license-key' ) );
